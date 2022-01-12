@@ -5,6 +5,7 @@
 
 extern crate kernel;
 
+use kernel::acpi;
 use kernel::idt;
 use kernel::io;
 use kernel::module::version::Version;
@@ -269,9 +270,8 @@ impl ClockSource for CMOSClock {
 
 #[no_mangle]
 pub extern "C" fn init() -> bool {
-	let century_register = false; // TODO Get from ACPI
-
-	let cmos_clock = CMOSClock::new(century_register);
+	// Creating and adding the CMOS clock
+	let cmos_clock = CMOSClock::new(acpi::is_century_register_present());
 	let success = time::add_clock_source(cmos_clock).is_err();
 
 	if !success {
@@ -282,5 +282,6 @@ pub extern "C" fn init() -> bool {
 
 #[no_mangle]
 pub extern "C" fn fini() {
+	// Removing the CMOS clock
 	time::remove_clock_source("CMOS");
 }
