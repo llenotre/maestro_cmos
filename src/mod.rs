@@ -10,7 +10,7 @@ use kernel::idt;
 use kernel::io;
 use kernel::module::version::Version;
 use kernel::time::ClockSource;
-use kernel::time::Timestamp;
+use kernel::time::unit::Timestamp;
 use kernel::time;
 
 // cmos module, version 1.0.0
@@ -249,7 +249,10 @@ impl CMOSClock {
 			year += century * 100;
 
 			let days_since_epoch = get_days_since_epoch(year, month - 1, day - 1); // TODO Fix
-			self.timestamp = Some(days_since_epoch * 86400 + hour * 3600 + minute * 60 + second);
+			self.timestamp = Some((days_since_epoch * 86400) as u64
+				+ (hour * 3600) as u64
+				+ (minute * 60) as u64
+				+ second as u64);
 		});
 	}
 }
