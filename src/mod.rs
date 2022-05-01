@@ -275,12 +275,12 @@ impl ClockSource for CMOSClock {
 pub extern "C" fn init() -> bool {
 	// Creating and adding the CMOS clock
 	let cmos_clock = CMOSClock::new(acpi::is_century_register_present());
-	let success = time::add_clock_source(cmos_clock).is_err();
-
-	if !success {
-		kernel::println!("Not enough memory to create the CMOS clock source!");
+	if let Err(e) = time::add_clock_source(cmos_clock) {
+		kernel::println!("Failed to create CMOS clock source: {}", e);
+		false
+	} else {
+		true
 	}
-	success
 }
 
 #[no_mangle]
