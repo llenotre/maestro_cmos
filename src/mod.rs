@@ -5,7 +5,10 @@
 
 extern crate kernel;
 
+mod rtc;
+
 use kernel::acpi;
+use kernel::errno::Errno;
 use kernel::idt;
 use kernel::io;
 use kernel::module::version::Version;
@@ -40,6 +43,8 @@ const CENTURY_REGISTER: u8 = 0x32;
 const STATUS_A_REGISTER: u8 = 0x0a;
 /// The ID of the status register B.
 const STATUS_B_REGISTER: u8 = 0x0b;
+/// The ID of the status register C.
+const STATUS_C_REGISTER: u8 = 0x0c;
 
 /// Bit of status register A, tells whether the time is being updated.
 const UPDATE_FLAG: u8 = 1 << 7;
@@ -131,22 +136,6 @@ fn time_wait() {
 	while !is_time_ready() {}
 }
 
-/// Initializes the Real Time Clock.
-fn init_rtc() {
-	idt::wrap_disable_interrupts(|| {
-		unsafe {
-			io::outb(SELECT_PORT, STATUS_A_REGISTER | (1 << 7));
-			io::outb(VALUE_PORT, 0x20);
-
-			io::outb(SELECT_PORT, STATUS_B_REGISTER | (1 << 7));
-			let prev = io::inb(VALUE_PORT);
-
-			io::outb(SELECT_PORT, STATUS_B_REGISTER | (1 << 7));
-			io::outb(VALUE_PORT, prev | 0x40);
-		}
-	});
-}
-
 /// Tells whether the given year is a leap year or not.
 fn is_leap_year(year: u32) -> bool {
 	if year % 4 != 0 {
@@ -214,8 +203,6 @@ impl CMOSClock {
 		}
 
 		idt::wrap_disable_interrupts(|| {
-			init_rtc();
-
 			time_wait();
 			let mut second = read(SECOND_REGISTER) as u32;
 			let mut minute = read(MINUTE_REGISTER) as u32;
@@ -271,11 +258,17 @@ impl ClockSource for CMOSClock {
 	}
 }
 
-#[no_mangle]
-pub extern "C" fn init() -> bool {
+fn init_() -> Result<(), Errno> {
 	// Creating and adding the CMOS clock
 	let cmos_clock = CMOSClock::new(acpi::is_century_register_present());
-	if let Err(e) = time::add_clock_source(cmos_clock) {
+	time::add_clock_source(cmos_clock)?;
+
+	rtc::init()
+}
+
+#[no_mangle]
+pub extern "C" fn init() -> bool {
+	if let Err(e) = init_() {
 		kernel::println!("Failed to create CMOS clock source: {}", e);
 		false
 	} else {
@@ -285,6 +278,8 @@ pub extern "C" fn init() -> bool {
 
 #[no_mangle]
 pub extern "C" fn fini() {
+	rtc::fini();
+
 	// Removing the CMOS clock
 	time::remove_clock_source("CMOS");
 }
