@@ -14,6 +14,7 @@ use kernel::io;
 use kernel::module::version::Version;
 use kernel::time::ClockSource;
 use kernel::time::unit::Timestamp;
+use kernel::time::unit::TimestampScale;
 use kernel::time;
 
 // cmos module, version 1.0.0
@@ -249,7 +250,8 @@ impl ClockSource for CMOSClock {
 		"CMOS"
 	}
 
-	fn get_time(&mut self) -> Timestamp {
+	fn get_time(&mut self, _scale: TimestampScale) -> Timestamp {
+		// TODO Use scale
 		if self.timestamp.is_none() {
 			self.init();
 		}
