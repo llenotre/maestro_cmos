@@ -7,6 +7,7 @@ extern crate kernel;
 
 mod rtc;
 
+use core::ops::Range;
 use kernel::acpi;
 use kernel::errno::Errno;
 use kernel::idt;
@@ -149,24 +150,23 @@ fn is_leap_year(year: u32) -> bool {
 }
 
 /// Returns the number of leap years between the two years.
-/// `y0` and `y1` are the range in years. If `y1` is greater than `y0`, then the behaviour is
+/// `y0` and `y1` are the range in years.
 /// undefined.
-fn leap_years_between(y0: u32, y1: u32) -> u32 {
-	debug_assert!(y1 <= y0);
-
-	let mut n = 0;
-	for i in y1..y0 {
-		if is_leap_year(i) {
-			n += 1;
-		}
-	}
-	n
+fn leap_years_between(range: Range<u32>) -> u32 {
+	range.into_iter()
+		.filter(| year | is_leap_year(*year))
+		.count() as _
 }
 
 /// Returns the number of days since epoch from the year, month and day of the month.
 fn get_days_since_epoch(year: u32, month: u32, day: u32) -> u32 {
-	let year_days = (year - 1970) * 365 + leap_years_between(year, 1970);
-	let month_days = (((month + 1) / 2) * 31) + ((month / 2) * 30);
+	let year_days = (year - 1970) * 365 + leap_years_between(1970..year);
+
+	let mut month_days = (((month + 1) / 2) * 31) + ((month / 2) * 30);
+	if is_leap_year(year) && month >= 2 {
+		month_days += 1;
+	}
+
 	year_days + month_days + day
 }
 
@@ -234,9 +234,11 @@ impl CMOSClock {
 				hour = ((hour & 0x7f) + 12) % 24;
 			}
 
+			day -= 1;
+			month -= 1;
 			year += century * 100;
 
-			let days_since_epoch = get_days_since_epoch(year, month - 1, day - 1); // TODO Fix
+			let days_since_epoch = get_days_since_epoch(year, month, day);
 			self.timestamp = Some((days_since_epoch * 86400) as u64
 				+ (hour * 3600) as u64
 				+ (minute * 60) as u64
@@ -246,17 +248,16 @@ impl CMOSClock {
 }
 
 impl ClockSource for CMOSClock {
-	fn get_name(&self) -> &str {
-		"CMOS"
+	fn get_name(&self) -> &'static str {
+		"cmos"
 	}
 
-	fn get_time(&mut self, _scale: TimestampScale) -> Timestamp {
-		// TODO Use scale
+	fn get_time(&mut self, scale: TimestampScale) -> Timestamp {
 		if self.timestamp.is_none() {
 			self.init();
 		}
 
-		self.timestamp.unwrap()
+		TimestampScale::convert(self.timestamp.unwrap(), TimestampScale::Second, scale)
 	}
 }
 
