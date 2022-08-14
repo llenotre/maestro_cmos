@@ -140,12 +140,12 @@ fn time_wait() {
 
 /// Tells whether the given year is a leap year or not.
 fn is_leap_year(year: u32) -> bool {
-	if year % 4 != 0 {
-		false
-	} else if year % 100 != 0 {
+	if year % 400 == 0 {
 		true
+	} else if year % 100 == 0 {
+		false
 	} else {
-		year % 400 == 0
+		year % 4 == 0
 	}
 }
 
@@ -162,10 +162,20 @@ fn leap_years_between(range: Range<u32>) -> u32 {
 fn get_days_since_epoch(year: u32, month: u32, day: u32) -> u32 {
 	let year_days = (year - 1970) * 365 + leap_years_between(1970..year);
 
-	let mut month_days = (((month + 1) / 2) * 31) + ((month / 2) * 30);
-	if is_leap_year(year) && month >= 2 {
-		month_days += 1;
-	}
+	let month_days: u32 = (0..month).map(| m | {
+		match m {
+			0 | 2 | 4 | 6 | 7 | 9 | 11 => 31,
+			3 | 5 | 8 | 10 => 30,
+
+			1 => if is_leap_year(year) {
+				29
+			} else {
+				28
+			},
+
+			_ => 0,
+		}
+	}).sum();
 
 	year_days + month_days + day
 }
