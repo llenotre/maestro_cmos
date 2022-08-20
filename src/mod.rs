@@ -17,6 +17,7 @@ use kernel::time::ClockSource;
 use kernel::time::unit::Timestamp;
 use kernel::time::unit::TimestampScale;
 use kernel::time;
+use kernel::util::lock::IntMutex;
 
 // cmos module, version 1.0.0
 kernel::module!("cmos", Version::new(1, 0, 0));
@@ -57,6 +58,9 @@ const FORMAT_BCD_FLAG: u8 = 1 << 2;
 
 /// The ID of the register used to store the Floopy Drive type.
 const FLOPPY_DRIVE_REGISTER: u8 = 0x10;
+
+/// The shift used on the timestamp to store it as a fixed point value.
+const TS_SHIFT: u64 = 7;
 
 /// Reads the register `reg` and returns the value.
 fn read(reg: u8) -> u8 {
@@ -127,6 +131,10 @@ pub fn get_floppy_type() -> FloppyDrives {
 	}
 }
 
+/// The current timestamp since the epoch.
+/// The variable contains a fixed-point representation.
+static CURR_TIMESTAMP: IntMutex<Timestamp> = IntMutex::new(0);
+
 /// Tells whether the CMOS is ready for time reading.
 fn is_time_ready() -> bool {
 	read(STATUS_A_REGISTER) & UPDATE_FLAG == 0
@@ -180,82 +188,60 @@ fn get_days_since_epoch(year: u32, month: u32, day: u32) -> u32 {
 	year_days + month_days + day
 }
 
+/// Initializes the current timestamp with the startup value.
+/// `century_register` tells whether the century register is available.
+/// If it isn't available, the 21st century is assumed.
+fn init_timestamp(century_register: bool) {
+	idt::wrap_disable_interrupts(|| {
+		time_wait();
+		let mut second = read(SECOND_REGISTER) as u32;
+		let mut minute = read(MINUTE_REGISTER) as u32;
+		let mut hour = read(HOUR_REGISTER) as u32;
+		let mut day = read(DAY_OF_MONTH_REGISTER) as u32;
+		let mut month = read(MONTH_REGISTER) as u32;
+		let mut year = read(YEAR_REGISTER) as u32;
+		let mut century = if century_register {
+			read(CENTURY_REGISTER)
+		} else {
+			20
+		} as u32;
+
+		let status_b = read(STATUS_B_REGISTER);
+		if status_b & FORMAT_BCD_FLAG == 0 {
+			second = (second & 0x0f) + ((second / 16) * 10);
+			minute = (minute & 0x0f) + ((minute / 16) * 10);
+			hour = ((hour & 0x0f) + (((hour & 0x70) / 16) * 10)) | (hour & 0x80);
+			day = (day & 0x0f) + ((day / 16) * 10);
+			month = (month & 0x0f) + ((month / 16) * 10);
+			year = (year & 0x0f) + ((year / 16) * 10);
+			if century_register {
+				century = (century & 0x0f) + (century / 16) * 10;
+			}
+		}
+
+		if (status_b & FORMAT_24_FLAG) == 0 && (hour & 0x80) != 0 {
+			hour = ((hour & 0x7f) + 12) % 24;
+		}
+
+		day -= 1;
+		month -= 1;
+		year += century * 100;
+
+		let days_since_epoch = get_days_since_epoch(year, month, day);
+		// The timestamp in seconds
+		let timestamp = (days_since_epoch * 86400) as u64
+			+ (hour * 3600) as u64
+			+ (minute * 60) as u64
+			+ second as u64;
+
+			let guard = CURR_TIMESTAMP.lock();
+			*guard.get_mut() = (timestamp * 1000) << TS_SHIFT;
+	});
+}
+
 /// Structure representing the CMOS clock source.
 /// This source is really slow to initialize (waits up to 1 second before reading).
-/// Maskable interrupts are disabled when retrieving the timestamp.
-pub struct CMOSClock {
-	/// Tells whether the century register is available.
-	century_register: bool,
-
-	/// The clock's current timestamp. If None, the clock is not initialized.
-	timestamp: Option<Timestamp>,
-}
-
-impl CMOSClock {
-	/// Creates a new instance. `century_register` tells whether the century register is available.
-	/// If it isn't available, the 21st century is assumed.
-	pub fn new(century_register: bool) -> Self {
-		Self {
-			century_register,
-
-			timestamp: None,
-		}
-	}
-
-	/// Tells whether the century register is available.
-	pub fn has_century_register(&self) -> bool {
-		self.century_register
-	}
-
-	/// Initializes the clock. If already initialized, the function does nothing.
-	fn init(&mut self) {
-		if self.timestamp.is_some() {
-			return;
-		}
-
-		idt::wrap_disable_interrupts(|| {
-			time_wait();
-			let mut second = read(SECOND_REGISTER) as u32;
-			let mut minute = read(MINUTE_REGISTER) as u32;
-			let mut hour = read(HOUR_REGISTER) as u32;
-			let mut day = read(DAY_OF_MONTH_REGISTER) as u32;
-			let mut month = read(MONTH_REGISTER) as u32;
-			let mut year = read(YEAR_REGISTER) as u32;
-			let mut century = if self.century_register {
-				read(CENTURY_REGISTER)
-			} else {
-				20
-			} as u32;
-
-			let status_b = read(STATUS_B_REGISTER);
-			if status_b & FORMAT_BCD_FLAG == 0 {
-				second = (second & 0x0f) + ((second / 16) * 10);
-				minute = (minute & 0x0f) + ((minute / 16) * 10);
-				hour = ((hour & 0x0f) + (((hour & 0x70) / 16) * 10)) | (hour & 0x80);
-				day = (day & 0x0f) + ((day / 16) * 10);
-				month = (month & 0x0f) + ((month / 16) * 10);
-				year = (year & 0x0f) + ((year / 16) * 10);
-				if self.century_register {
-					century = (century & 0x0f) + (century / 16) * 10;
-				}
-			}
-
-			if (status_b & FORMAT_24_FLAG) == 0 && (hour & 0x80) != 0 {
-				hour = ((hour & 0x7f) + 12) % 24;
-			}
-
-			day -= 1;
-			month -= 1;
-			year += century * 100;
-
-			let days_since_epoch = get_days_since_epoch(year, month, day);
-			self.timestamp = Some((days_since_epoch * 86400) as u64
-				+ (hour * 3600) as u64
-				+ (minute * 60) as u64
-				+ second as u64);
-		});
-	}
-}
+pub struct CMOSClock {}
 
 impl ClockSource for CMOSClock {
 	fn get_name(&self) -> &'static str {
@@ -263,18 +249,17 @@ impl ClockSource for CMOSClock {
 	}
 
 	fn get_time(&mut self, scale: TimestampScale) -> Timestamp {
-		if self.timestamp.is_none() {
-			self.init();
-		}
-
-		TimestampScale::convert(self.timestamp.unwrap(), TimestampScale::Second, scale)
+		let guard = CURR_TIMESTAMP.lock();
+		let ts = *guard.get() >> TS_SHIFT;
+		TimestampScale::convert(ts, TimestampScale::Millisecond, scale)
 	}
 }
 
 fn init_() -> Result<(), Errno> {
+	init_timestamp(acpi::is_century_register_present());
+
 	// Creating and adding the CMOS clock
-	let cmos_clock = CMOSClock::new(acpi::is_century_register_present());
-	time::add_clock_source(cmos_clock)?;
+	time::add_clock_source(CMOSClock {})?;
 
 	rtc::init()
 }
