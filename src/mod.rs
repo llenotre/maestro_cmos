@@ -20,7 +20,7 @@ use kernel::time;
 use kernel::util::lock::IntMutex;
 
 // cmos module, version 1.0.0
-kernel::module!("cmos", Version::new(1, 0, 0));
+kernel::module!("cmos", Version::new(1, 0, 0), &[]);
 
 /// The ID of the port used to select the CMOS register to read.
 const SELECT_PORT: u16 = 0x70;
@@ -249,8 +249,11 @@ impl ClockSource for CMOSClock {
 	}
 
 	fn get_time(&mut self, scale: TimestampScale) -> Timestamp {
-		let guard = CURR_TIMESTAMP.lock();
-		let ts = *guard.get() >> TS_SHIFT;
+		let ts = {
+			let guard = CURR_TIMESTAMP.lock();
+			*guard.get() >> TS_SHIFT
+		};
+
 		TimestampScale::convert(ts, TimestampScale::Millisecond, scale)
 	}
 }
