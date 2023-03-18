@@ -234,8 +234,7 @@ fn init_timestamp(century_register: bool) {
 			+ (minute * 60) as u64
 			+ second as u64;
 
-			let guard = CURR_TIMESTAMP.lock();
-			*guard.get_mut() = (timestamp * 1000) << TS_SHIFT;
+			*CURR_TIMESTAMP.lock() = (timestamp * 1000) << TS_SHIFT;
 	});
 }
 
@@ -249,10 +248,7 @@ impl ClockSource for CMOSClock {
 	}
 
 	fn get_time(&mut self, scale: TimestampScale) -> Timestamp {
-		let ts = {
-			let guard = CURR_TIMESTAMP.lock();
-			*guard.get() >> TS_SHIFT
-		};
+		let ts = *CURR_TIMESTAMP.lock() >> TS_SHIFT;
 
 		TimestampScale::convert(ts, TimestampScale::Millisecond, scale)
 	}

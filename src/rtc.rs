@@ -44,10 +44,7 @@ pub fn init() -> Result<(), Errno> {
 	// Registering callback
 	let handle = event::register_callback(0x28, 0, | _, _, _, _ | {
 		// Incrementing fixed point timestamp
-		{
-			let guard = super::CURR_TIMESTAMP.lock();
-			*guard.get_mut() += 125;
-		}
+		*super::CURR_TIMESTAMP.lock() += 125;
 
 		reset();
 		InterruptResult::new(false, InterruptResultAction::Resume)
