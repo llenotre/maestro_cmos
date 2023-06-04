@@ -2,8 +2,7 @@
 
 use kernel::errno::Errno;
 use kernel::event::CallbackHook;
-use kernel::event::InterruptResult;
-use kernel::event::InterruptResultAction;
+use kernel::event::CallbackResult;
 use kernel::event;
 use kernel::idt;
 use kernel::io;
@@ -42,12 +41,12 @@ pub fn init() -> Result<(), Errno> {
 	});
 
 	// Registering callback
-	let handle = event::register_callback(0x28, 0, | _, _, _, _ | {
+	let handle = event::register_callback(0x28, | _, _, _, _ | {
 		// Incrementing fixed point timestamp
 		*super::CURR_TIMESTAMP.lock() += 125;
 
 		reset();
-		InterruptResult::new(false, InterruptResultAction::Resume)
+		CallbackResult::Continue
 	})?;
 
 	// Safe because the function is call only once at initialization
